@@ -1,4 +1,4 @@
-import { daySeries, goalReport, isScheduled, streak, summarise, whatIf } from './stats'
+import { daySeries, goalReport, isScheduled, momentum, pct, streak, summarise, whatIf } from './stats'
 import type { Completion, Data, Goal, Task } from './types'
 
 let fails = 0
@@ -68,6 +68,27 @@ eq('weekly: extras ignored', summarise(daySeries([wk], wfull, '2026-11-02', '202
 // task starting mid-week gets a pro-rated quota
 const wmid = mk('m', { weekly_target: 5, start_date: '2026-11-07' })
 eq('weekly: mid-week quota capped', summarise(daySeries([wmid], [], '2026-11-02', '2026-11-08')).scheduled, 2)
+
+// momentum: daily task from Nov 1, done Nov 1,2,4 (3 missed)
+const mo = momentum([t1], cs, '2026-11-01', '2026-11-04')
+eq('momentum dates', mo.map((m) => m.date), ['2026-11-01', '2026-11-02', '2026-11-03', '2026-11-04'])
+eq('momentum ignores days before start', mo[0].rate, 1)
+near('momentum rolling', mo[3].rate!, 0.75) // 3 of 4 scheduled in window
+eq('momentum single day', mo[2].day, 0)
+// window slides: after 7 days only the last 7 count
+const t8 = mk('t8')
+const mo8 = momentum([t8], [comp('t8', '2026-11-01')], '2026-11-08', '2026-11-08')
+eq('momentum drops days outside window', mo8[0].rate, 0) // Nov 1 is outside Nov 2..8
+eq('momentum empty range', momentum([t1], cs, '2026-11-05', '2026-11-04'), [])
+
+// goal that has not started yet is not behind, and its whole span is still ahead
+const later: Goal = { ...goal, id: 'g2', start_date: '2026-11-10', end_date: '2026-12-10' }
+const r2 = goalReport({ goals: [later], tasks: [mk('run2', { goal_id: 'g2', amount: 10, start_date: '2026-11-10' })], completions: [] }, later, '2026-11-03')!
+eq('goal before start on track', r2.onTrack, true)
+eq('goal before start days left', r2.daysLeft, 31)
+
+eq('pct never rounds partial up to 100', pct(216 / 217), '99%')
+eq('pct full', pct(1), '100%')
 
 if (fails) { console.error(`${fails} failed`); process.exit(1) }
 console.log('all passed')

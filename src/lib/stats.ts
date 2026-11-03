@@ -89,6 +89,18 @@ export function daySeries(tasks: Task[], cs: Completion[], from: string, to: str
   })
 }
 
+/** 7-day rolling completion rate for each day in [from..to] (looks back 6 days before `from`). */
+export function momentum(tasks: Task[], cs: Completion[], from: string, to: string): { date: string; rate: number | null; day: number | null }[] {
+  if (from > to) return []
+  const s = daySeries(tasks, cs, addDays(from, -6), to)
+  return s.slice(6).map((d, i) => {
+    const win = s.slice(i, i + 7)
+    const sched = win.reduce((a, x) => a + x.scheduled, 0)
+    const done = win.reduce((a, x) => a + x.done, 0)
+    return { date: d.date, rate: sched ? done / sched : null, day: d.hasWork ? d.rate : null }
+  })
+}
+
 export interface Summary {
   scheduled: number
   done: number
@@ -235,9 +247,10 @@ export function goalReport(data: Data, goal: Goal, todayStr: string): GoalReport
       } else if (sched) remainingSched += potential(t)
     }
   }
-  const elapsed = Math.max(1, Math.min(totalDays, diffDays(start, todayStr) + 1))
-  const perDay = progress / elapsed
-  const daysLeft = Math.max(0, diffDays(todayStr, end))
+  // before the goal starts nothing is expected yet, and the full span is still ahead
+  const elapsed = Math.max(0, Math.min(totalDays, diffDays(start, todayStr) + 1))
+  const perDay = elapsed ? progress / elapsed : 0
+  const daysLeft = todayStr < start ? totalDays : Math.max(0, diffDays(todayStr, end))
   const paceFinal = progress + perDay * daysLeft
   const missTodayFinal = progress + remainingSched
   const bestFinal = progress + todayPending + remainingSched
@@ -269,4 +282,6 @@ export function goalReport(data: Data, goal: Goal, todayStr: string): GoalReport
   }
 }
 
-export const pct = (x: number) => `${Math.round(x * 100)}%`
+/** whole percent that never rounds a partial result up to 100 */
+export const pctNum = (x: number) => (x < 1 ? Math.min(99, Math.round(x * 100)) : Math.round(x * 100))
+export const pct = (x: number) => `${pctNum(x)}%`

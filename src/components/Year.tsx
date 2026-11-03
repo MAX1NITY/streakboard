@@ -36,9 +36,13 @@ export default function Year({ data, scope, setScope }: { data: Data; scope: Sco
   const weeks: (typeof cells)[] = []
   for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
 
+  // label a column when its first day starts a new month (the partial first week counts once)
+  let lastMonth = ''
   const monthLabels = weeks.map((wk) => {
-    const first = wk.find(Boolean)
-    return first && first.date.slice(8) <= '07' ? MONTHS[Number(first.date.slice(5, 7)) - 1] : ''
+    const m = wk.find(Boolean)?.date.slice(5, 7) ?? ''
+    if (!m || m === lastMonth) return ''
+    lastMonth = m
+    return MONTHS[Number(m) - 1]
   })
 
   const monthRates = MONTHS.map((_, m) => {

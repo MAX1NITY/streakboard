@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { clearCache, cloudEnabled, supabase } from './lib/repo'
 import { useStore } from './store'

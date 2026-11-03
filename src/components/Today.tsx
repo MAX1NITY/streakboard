@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import type { Data, Task } from '../lib/types'
 import { addDays, endOfMonth, longDate, startOfMonth, today as todayFn } from '../lib/dates'
 import { completionMap, dayPlan, daySeries, isScheduled, isWeekly, pct, streak, summarise, weekProgress, whatIf } from '../lib/stats'
@@ -31,15 +31,16 @@ interface Props {
 
 function Ring({ value, label }: { value: number; label: string }) {
   const r = 46, c = 2 * Math.PI * r
+  const gid = useId().replace(/:/g, '') // colons from useId break url(#id) refs in some browsers
   return (
     <svg viewBox="0 0 120 120" className="ring" role="img" aria-label={`${label}: ${pct(value)}`}>
       <defs>
-        <linearGradient id="ring-grad" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id={gid} x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#7aa8ff" /><stop offset="100%" stopColor="#5eeaaa" />
         </linearGradient>
       </defs>
       <circle cx="60" cy="60" r={r} className="ring-bg" />
-      <circle cx="60" cy="60" r={r} className="ring-fg" stroke="url(#ring-grad)" strokeDasharray={`${c * value} ${c}`} transform="rotate(-90 60 60)" />
+      <circle cx="60" cy="60" r={r} className="ring-fg" stroke={`url(#${gid})`} strokeDasharray={`${c * value} ${c}`} transform="rotate(-90 60 60)" />
       <text x="60" y="58" textAnchor="middle" className="ring-num">{pct(value)}</text>
       <text x="60" y="76" textAnchor="middle" className="ring-sub">{label}</text>
     </svg>
@@ -99,12 +100,15 @@ export default function Today({ data, toggle, setAmount, save, del }: Props) {
 
   const mFrom = startOfMonth(date), mTo = endOfMonth(date)
   const w = useMemo(() => whatIf(live, data.completions, mFrom, mTo, real), [live, data.completions, mFrom, mTo, real])
-  const monthSoFar = summarise(daySeries(live, data.completions, mFrom, date > mTo ? mTo : date))
+  // "so far" never reaches past real today, even when viewing a future date
+  const soFarTo = [date, real, mTo].sort()[0]
+  const monthSoFar = summarise(daySeries(live, data.completions, mFrom, soFarTo))
   const week = daySeries(live, data.completions, addDays(real, -6), real)
 
   const goalOf = (t: Task) => data.goals.find((g) => g.id === t.goal_id)
 
-  function Row({ t, late, muted }: { t: Task; late?: boolean; muted?: boolean }) {
+  // a render function, not a component: an inner component would remount every row on each render
+  function row(t: Task, late?: boolean, muted?: boolean) {
     const rowDate = late ? (t.end_date ?? t.start_date) : date
     const comp = cm.get(t.id + '|' + rowDate)
     const isDone = Boolean(comp)
@@ -113,7 +117,7 @@ export default function Today({ data, toggle, setAmount, save, del }: Props) {
     const numeric = g?.kind === 'numeric'
     const wp = isWeekly(t) ? weekProgress(t, rowDate, cm) : null
     return (
-      <li className={'task' + (isDone || muted ? ' done' : '')}>
+      <li key={t.id} className={'task' + (isDone || muted ? ' done' : '')}>
         <button className={'check' + (isDone ? ' on' : '')} onClick={() => toggle(t, rowDate)} aria-pressed={isDone} aria-label={`${isDone ? 'Unmark' : 'Mark'} ${t.title}`}>
           {isDone ? '✓' : ''}
         </button>
@@ -180,7 +184,7 @@ export default function Today({ data, toggle, setAmount, save, del }: Props) {
     curve: (
       <div className="card">
         <div className="row between"><div className="card-title">Momentum</div><span className="small muted">last 30 days</span></div>
-        <div className="chart"><MomentumCurve tasks={live} completions={data.completions} end={date > real ? real : date} /></div>
+        <div className="chart"><MomentumCurve tasks={live} completions={data.completions} from={addDays(date > real ? real : date, -29)} to={date > real ? real : date} /></div>
       </div>
     ),
     tasks: (
@@ -188,7 +192,7 @@ export default function Today({ data, toggle, setAmount, save, del }: Props) {
         {overdue.length > 0 && (
           <>
             <div className="section">Overdue</div>
-            <ul className="list">{overdue.map((t) => <Row key={t.id} t={t} late />)}</ul>
+            <ul className="list">{overdue.map((t) => row(t, true))}</ul>
           </>
         )}
         <div className="section row between">
@@ -201,11 +205,11 @@ export default function Today({ data, toggle, setAmount, save, del }: Props) {
           </div>
         ) : (
           <>
-            {counted.length > 0 && <ul className="list">{counted.map((t) => <Row key={t.id} t={t} />)}</ul>}
+            {counted.length > 0 && <ul className="list">{counted.map((t) => row(t))}</ul>}
             {optional.length > 0 && (
               <>
                 <div className="section">Weekly goals, flexible days</div>
-                <ul className="list">{optional.map((t) => <Row key={t.id} t={t} />)}</ul>
+                <ul className="list">{optional.map((t) => row(t))}</ul>
               </>
             )}
           </>
@@ -213,7 +217,7 @@ export default function Today({ data, toggle, setAmount, save, del }: Props) {
         {met.length > 0 && (
           <>
             <div className="section">Weekly target met 🎉</div>
-            <ul className="list">{met.map((t) => <Row key={t.id} t={t} muted />)}</ul>
+            <ul className="list">{met.map((t) => row(t, false, true))}</ul>
           </>
         )}
       </div>

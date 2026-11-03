@@ -4,7 +4,7 @@ import type { Data } from '../lib/types'
 import {
   addDays, endOfMonth, endOfYear, parse, shortDate, startOfMonth, startOfWeek, startOfYear, today as todayFn
 } from '../lib/dates'
-import { daySeries, pct, streak, summarise, whatIf } from '../lib/stats'
+import { daySeries, pct, pctNum, streak, summarise, whatIf } from '../lib/stats'
 import ScopePicker, { scopeTasks, type Scope } from './ScopePicker'
 import { C, ChartTip, MomentumCurve, axis } from './Charts'
 
@@ -48,14 +48,15 @@ export default function Stats({ data, scope, setScope }: { data: Data; scope: Sc
   // bars: days for week/month, months for year
   const bars = useMemo(() => {
     if (range !== 'year') {
-      return series.map((d) => ({ name: range === 'week' ? parse(d.date).toLocaleDateString(undefined, { weekday: 'short' }) : String(parseInt(d.date.slice(8), 10)), rate: d.hasWork ? Math.round(d.rate * 100) : null, date: d.date, future: d.date > real, done: d.done, sched: d.scheduled }))
+      return series.map((d) => ({ name: range === 'week' ? parse(d.date).toLocaleDateString(undefined, { weekday: 'short' }) : String(parseInt(d.date.slice(8), 10)), rate: d.hasWork && d.date <= real ? pctNum(d.rate) : null, ghost: d.hasWork && d.date > real ? 100 : null, date: d.date, future: d.date > real, done: d.done, sched: d.scheduled }))
     }
-    const out: { name: string; rate: number | null; date: string; future: boolean; done: number; sched: number }[] = []
+    const out: { name: string; rate: number | null; ghost: number | null; date: string; future: boolean; done: number; sched: number }[] = []
     for (let m = 0; m < 12; m++) {
       const key = `${anchor.slice(0, 4)}-${String(m + 1).padStart(2, '0')}`
-      const days = series.filter((d) => d.date.startsWith(key))
+      const days = series.filter((d) => d.date.startsWith(key) && d.date <= real)
       const s = summarise(days)
-      out.push({ name: new Date(2000, m, 1).toLocaleDateString(undefined, { month: 'short' }), rate: s.scheduled ? Math.round(s.rate * 100) : null, date: key + '-01', future: key + '-01' > real, done: s.done, sched: s.scheduled })
+      const future = key + '-01' > real
+      out.push({ name: new Date(2000, m, 1).toLocaleDateString(undefined, { month: 'short' }), rate: s.scheduled ? pctNum(s.rate) : null, ghost: future && summarise(series.filter((d) => d.date.startsWith(key))).scheduled ? 100 : null, date: key + '-01', future, done: s.done, sched: s.scheduled })
     }
     return out
   }, [series, range, anchor, real])
@@ -111,7 +112,7 @@ export default function Stats({ data, scope, setScope }: { data: Data; scope: Sc
           <div className="grid4">
             <div className="stat"><span>Completion</span><b>{pct(sum.rate)}</b><small>{sum.done}/{sum.scheduled} so far</small></div>
             <div className="stat"><span>Streak</span><b>🔥 {st.current}</b><small>best {st.best}</small></div>
-            <div className="stat"><span>Left to do</span><b>{total.scheduled - sum.scheduled}</b><small>scheduled ahead</small></div>
+            <div className="stat"><span>Left to do</span><b>{total.scheduled - sum.scheduled + (includesToday ? w.pendingToday : 0)}</b><small>including today</small></div>
             <div className="stat"><span>Period max</span><b>{pct(w.periodRateIfPerfectFuture)}</b><small>if perfect from now</small></div>
           </div>
 
@@ -141,20 +142,21 @@ export default function Stats({ data, scope, setScope }: { data: Data; scope: Sc
                   <CartesianGrid stroke="#ffffff0d" strokeDasharray="3 6" vertical={false} />
                   <XAxis dataKey="name" {...axis} interval={range === 'month' ? 2 : 0} />
                   <YAxis {...axis} domain={[0, 100]} ticks={[0, 50, 100]} unit="%" />
-                  <Tooltip cursor={{ fill: '#ffffff08', radius: 6 } as any} content={<ChartTip fmt={(_l: string, pl: any[]) => { const b = pl[0].payload; return `${shortDate(b.date)} · ${b.done}/${b.sched} done` }} />} />
-                  <Bar dataKey="rate" name="Done" unit="%" radius={[6, 6, 2, 2]} maxBarSize={28}>
-                    {bars.map((b, i) => <Cell key={i} fill={b.future ? C.future : (b.rate ?? 0) >= 100 ? 'url(#bar-g)' : (b.rate ?? 0) >= 50 ? 'url(#bar-b)' : 'url(#bar-r)'} />)}
+                  <Tooltip cursor={{ fill: '#ffffff08', radius: 6 } as any} content={<ChartTip fmt={(_l: string, pl: any[]) => { const b = pl[0].payload; return `${range === 'year' ? b.name : shortDate(b.date)} · ${b.future ? 'upcoming' : `${b.done}/${b.sched} done`}` }} />} />
+                  <Bar dataKey="rate" name="Done" unit="%" stackId="d" maxBarSize={28}>
+                    {bars.map((b, i) => <Cell key={i} fill={(b.rate ?? 0) >= 100 ? 'url(#bar-g)' : (b.rate ?? 0) >= 50 ? 'url(#bar-b)' : 'url(#bar-r)'} radius={[6, 6, 2, 2] as any} />)}
                   </Bar>
+                  <Bar dataKey="ghost" stackId="d" fill={C.future} radius={[6, 6, 2, 2]} maxBarSize={28} tooltipType="none" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <div className="legend"><i style={{ background: GREEN }} />all done <i style={{ background: BLUE }} />50%+ <i style={{ background: RED }} />under 50% <i style={{ background: '#2c3254' }} />upcoming</div>
+            <div className="legend"><i style={{ background: GREEN }} />all done <i style={{ background: BLUE }} />50%+ <i style={{ background: RED }} />under 50% <i style={{ background: C.future }} />upcoming</div>
           </div>
 
           <div className="card">
             <div className="card-title">Momentum</div>
             <div className="small muted">Your 7-day average, smoothed. Dots are single days.</div>
-            <div className="chart"><MomentumCurve tasks={tasks} completions={data.completions} end={p.to < real ? p.to : real} days={range === 'year' ? 365 : range === 'month' ? 30 : 14} height={200} /></div>
+            <div className="chart"><MomentumCurve tasks={tasks} completions={data.completions} from={p.from} to={p.to < real ? p.to : real} height={200} /></div>
           </div>
 
           <div className="card">
@@ -179,7 +181,7 @@ export default function Stats({ data, scope, setScope }: { data: Data; scope: Sc
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
-            <div className="legend"><i style={{ background: GREEN }} />done <i style={{ background: GREY }} />everything scheduled <i style={{ background: RED }} />miss-today path</div>
+            <div className="legend"><i style={{ background: GREEN }} />done <i style={{ background: GREY }} />everything scheduled <i style={{ background: GREEN, opacity: .6 }} />finish-today path <i style={{ background: RED }} />miss-today path</div>
           </div>
 
           {scope.kind !== 'task' && perTask.length > 1 && (
