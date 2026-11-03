@@ -3,6 +3,23 @@ import type { Data, Task } from '../lib/types'
 import { addDays, endOfMonth, longDate, startOfMonth, today as todayFn } from '../lib/dates'
 import { completionMap, dayPlan, daySeries, isScheduled, isWeekly, pct, streak, summarise, weekProgress, whatIf } from '../lib/stats'
 import { TaskForm } from './Forms'
+import { MomentumCurve } from './Charts'
+
+type SectionId = 'progress' | 'whatif' | 'curve' | 'tasks'
+const SECTION_NAMES: Record<SectionId, string> = { progress: 'Progress ring', whatif: 'What today does', curve: 'Momentum curve', tasks: 'Tasks' }
+const DEFAULT_ORDER: SectionId[] = ['progress', 'whatif', 'tasks', 'curve']
+const LAYOUT_KEY = 'sb-dashboard'
+
+// layout lives on this device only; it's a viewing preference, not data
+function loadLayout(): { order: SectionId[]; hidden: SectionId[] } {
+  try {
+    const v = JSON.parse(localStorage.getItem(LAYOUT_KEY) || '')
+    const order = (v.order as SectionId[]).filter((id) => id in SECTION_NAMES)
+    return { order: [...order, ...DEFAULT_ORDER.filter((id) => !order.includes(id))], hidden: v.hidden ?? [] }
+  } catch {
+    return { order: DEFAULT_ORDER, hidden: [] }
+  }
+}
 
 interface Props {
   data: Data
@@ -16,8 +33,13 @@ function Ring({ value, label }: { value: number; label: string }) {
   const r = 46, c = 2 * Math.PI * r
   return (
     <svg viewBox="0 0 120 120" className="ring" role="img" aria-label={`${label}: ${pct(value)}`}>
+      <defs>
+        <linearGradient id="ring-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#7aa8ff" /><stop offset="100%" stopColor="#5eeaaa" />
+        </linearGradient>
+      </defs>
       <circle cx="60" cy="60" r={r} className="ring-bg" />
-      <circle cx="60" cy="60" r={r} className="ring-fg" strokeDasharray={`${c * value} ${c}`} transform="rotate(-90 60 60)" />
+      <circle cx="60" cy="60" r={r} className="ring-fg" stroke="url(#ring-grad)" strokeDasharray={`${c * value} ${c}`} transform="rotate(-90 60 60)" />
       <text x="60" y="58" textAnchor="middle" className="ring-num">{pct(value)}</text>
       <text x="60" y="76" textAnchor="middle" className="ring-sub">{label}</text>
     </svg>
@@ -112,18 +134,21 @@ export default function Today({ data, toggle, setAmount, save, del }: Props) {
     )
   }
 
-  return (
-    <div className="stack">
-      <div className="row between">
-        <button className="icon" onClick={() => setDate(addDays(date, -1))} aria-label="Previous day">‹</button>
-        <div className="center">
-          <div className="h">{date === real ? 'Today' : longDate(date)}</div>
-          {date === real && <div className="muted small">{longDate(date)}</div>}
-        </div>
-        <button className="icon" onClick={() => setDate(addDays(date, 1))} aria-label="Next day">›</button>
-      </div>
-      {date !== real && <button className="link center" onClick={() => setDate(real)}>Jump to today</button>}
+  const [layout, setLayout] = useState(loadLayout)
+  const [arranging, setArranging] = useState(false)
+  const [dragId, setDragId] = useState<SectionId | null>(null)
+  const saveLayout = (l: typeof layout) => {
+    setLayout(l)
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(l)) } catch { /* private mode: layout just won't persist */ }
+  }
+  const move = (id: SectionId, to: number) => {
+    const order = layout.order.filter((x) => x !== id)
+    order.splice(Math.max(0, Math.min(order.length, to)), 0, id)
+    saveLayout({ ...layout, order })
+  }
 
+  const sections: Record<SectionId, JSX.Element | null> = {
+    progress: (
       <div className="card hero">
         <Ring value={dayRate} label={`${done}/${counted.length} done`} />
         <div className="grow stack tight">
@@ -139,53 +164,114 @@ export default function Today({ data, toggle, setAmount, save, del }: Props) {
           <div className="muted small">Month so far: <b>{pct(monthSoFar.rate)}</b> ({monthSoFar.done}/{monthSoFar.scheduled})</div>
         </div>
       </div>
-
-      {date === real && w.pendingToday > 0 && (
-        <div className="card whatif">
-          <div className="small muted">What today does to your month</div>
-          <div className="grid2 gap">
-            <div className="pill good"><span>Finish today</span><b>{pct(w.periodRateIfDo)}</b></div>
-            <div className="pill bad"><span>Miss today</span><b>{pct(w.periodRateIfMiss)}</b></div>
-          </div>
-          <div className="small muted">If you then hit everything for the rest of the month: {pct(w.periodRateIfPerfectFuture)} at best.</div>
+    ),
+    whatif: date === real && w.pendingToday > 0 ? (
+      <div className="card whatif">
+        <div className="small muted">What today does to your month</div>
+        <div className="grid2 gap">
+          <div className="pill good"><span>Finish today</span><b>{pct(w.periodRateIfDo)}</b></div>
+          <div className="pill bad"><span>Miss today</span><b>{pct(w.periodRateIfMiss)}</b></div>
         </div>
-      )}
-      {date === real && w.pendingToday === 0 && counted.length > 0 && (
-        <div className="card whatif good-card">Everything required today is done. Your month is on <b>{pct(w.periodRateIfDo)}</b>.</div>
-      )}
-
-      {overdue.length > 0 && (
-        <>
-          <div className="section">Overdue</div>
-          <ul className="list">{overdue.map((t) => <Row key={t.id} t={t} late />)}</ul>
-        </>
-      )}
-
-      <div className="section row between">
-        <span>{date === real ? 'Today' : 'This day'}</span>
-        <button className="btn small-btn" onClick={() => setEditing('new')}>+ Task</button>
+        <div className="small muted">If you then hit everything for the rest of the month: {pct(w.periodRateIfPerfectFuture)} at best.</div>
       </div>
-      {counted.length === 0 && optional.length === 0 ? (
-        <div className="empty card">
-          {live.length === 0 ? 'No tasks yet. Add your first one, then watch the graphs fill up.' : 'Nothing scheduled for this day.'}
+    ) : date === real && counted.length > 0 ? (
+      <div className="card whatif good-card">Everything required today is done. Your month is on <b>{pct(w.periodRateIfDo)}</b>.</div>
+    ) : null,
+    curve: (
+      <div className="card">
+        <div className="row between"><div className="card-title">Momentum</div><span className="small muted">last 30 days</span></div>
+        <div className="chart"><MomentumCurve tasks={live} completions={data.completions} end={date > real ? real : date} /></div>
+      </div>
+    ),
+    tasks: (
+      <div className="stack">
+        {overdue.length > 0 && (
+          <>
+            <div className="section">Overdue</div>
+            <ul className="list">{overdue.map((t) => <Row key={t.id} t={t} late />)}</ul>
+          </>
+        )}
+        <div className="section row between">
+          <span>{date === real ? 'Today' : 'This day'}</span>
+          <button className="btn small-btn" onClick={() => setEditing('new')}>+ Task</button>
         </div>
-      ) : (
-        <>
-          {counted.length > 0 && <ul className="list">{counted.map((t) => <Row key={t.id} t={t} />)}</ul>}
-          {optional.length > 0 && (
-            <>
-              <div className="section">Weekly goals, flexible days</div>
-              <ul className="list">{optional.map((t) => <Row key={t.id} t={t} />)}</ul>
-            </>
-          )}
-        </>
-      )}
+        {counted.length === 0 && optional.length === 0 ? (
+          <div className="empty card">
+            {live.length === 0 ? 'No tasks yet. Add your first one, then watch the graphs fill up.' : 'Nothing scheduled for this day.'}
+          </div>
+        ) : (
+          <>
+            {counted.length > 0 && <ul className="list">{counted.map((t) => <Row key={t.id} t={t} />)}</ul>}
+            {optional.length > 0 && (
+              <>
+                <div className="section">Weekly goals, flexible days</div>
+                <ul className="list">{optional.map((t) => <Row key={t.id} t={t} />)}</ul>
+              </>
+            )}
+          </>
+        )}
+        {met.length > 0 && (
+          <>
+            <div className="section">Weekly target met 🎉</div>
+            <ul className="list">{met.map((t) => <Row key={t.id} t={t} muted />)}</ul>
+          </>
+        )}
+      </div>
+    )
+  }
 
-      {met.length > 0 && (
-        <>
-          <div className="section">Weekly target met 🎉</div>
-          <ul className="list">{met.map((t) => <Row key={t.id} t={t} muted />)}</ul>
-        </>
+  const shown = layout.order.filter((id) => !layout.hidden.includes(id))
+
+  return (
+    <div className="stack">
+      <div className="row between">
+        <button className="icon" onClick={() => setDate(addDays(date, -1))} aria-label="Previous day">‹</button>
+        <div className="center">
+          <div className="h">{date === real ? 'Today' : longDate(date)}</div>
+          {date === real && <div className="muted small">{longDate(date)}</div>}
+        </div>
+        <button className="icon" onClick={() => setDate(addDays(date, 1))} aria-label="Next day">›</button>
+      </div>
+      <div className="row between">
+        {date !== real ? <button className="link" onClick={() => setDate(real)}>Jump to today</button> : <span />}
+        <button className={'btn small-btn' + (arranging ? ' primary' : '')} onClick={() => setArranging(!arranging)} aria-pressed={arranging}>
+          {arranging ? 'Done arranging' : 'Arrange'}
+        </button>
+      </div>
+      {arranging && <div className="small muted center">Drag sections by their bar, or use the arrows. Hidden sections can be added back at the bottom.</div>}
+
+      {shown.map((id, i) => {
+        const node = sections[id]
+        if (!arranging) return node && <div key={id} className="dash-item">{node}</div>
+        return (
+          <div
+            key={id}
+            className={'dash-item arranging' + (dragId === id ? ' dragging' : '')}
+            draggable
+            onDragStart={(e) => { setDragId(id); e.dataTransfer.effectAllowed = 'move' }}
+            onDragEnd={() => setDragId(null)}
+            onDragOver={(e) => {
+              e.preventDefault()
+              if (dragId && dragId !== id) move(dragId, layout.order.indexOf(id))
+            }}
+          >
+            <div className="dash-bar">
+              <span className="grip" aria-hidden>⠿</span>
+              <span className="grow">{SECTION_NAMES[id]}</span>
+              <button className="icon small-i" onClick={() => move(id, layout.order.indexOf(shown[i - 1]))} disabled={i === 0} aria-label={`Move ${SECTION_NAMES[id]} up`}>↑</button>
+              <button className="icon small-i" onClick={() => move(id, layout.order.indexOf(shown[i + 1]))} disabled={i === shown.length - 1} aria-label={`Move ${SECTION_NAMES[id]} down`}>↓</button>
+              <button className="icon small-i" onClick={() => saveLayout({ ...layout, hidden: [...layout.hidden, id] })} aria-label={`Hide ${SECTION_NAMES[id]}`}>✕</button>
+            </div>
+            <div className="dash-body">{node ?? <div className="empty small">Shows up on today while tasks are scheduled.</div>}</div>
+          </div>
+        )
+      })}
+      {arranging && layout.hidden.length > 0 && (
+        <div className="chips">
+          {layout.hidden.map((id) => (
+            <button key={id} className="chip" onClick={() => saveLayout({ ...layout, hidden: layout.hidden.filter((x) => x !== id) })}>+ {SECTION_NAMES[id]}</button>
+          ))}
+        </div>
       )}
 
       {editing && (

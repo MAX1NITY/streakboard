@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
-import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { Data } from '../lib/types'
 import {
   addDays, endOfMonth, endOfYear, parse, shortDate, startOfMonth, startOfWeek, startOfYear, today as todayFn
 } from '../lib/dates'
 import { daySeries, pct, streak, summarise, whatIf } from '../lib/stats'
 import ScopePicker, { scopeTasks, type Scope } from './ScopePicker'
+import { C, ChartTip, MomentumCurve, axis } from './Charts'
 
 type Range = 'week' | 'month' | 'year'
 
@@ -29,7 +30,7 @@ function shift(range: Range, anchor: string, dir: 1 | -1): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-const GREEN = '#5eeaaa', RED = '#ff7b9c', BLUE = '#6ea8ff', GREY = '#5b6384'
+const GREEN = C.mint, RED = C.rose, BLUE = C.sky, GREY = C.axis
 
 export default function Stats({ data, scope, setScope }: { data: Data; scope: Scope; setScope: (s: Scope) => void }) {
   const real = todayFn()
@@ -130,12 +131,19 @@ export default function Stats({ data, scope, setScope }: { data: Data; scope: Sc
             <div className="chart">
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={bars} margin={{ top: 8, right: 4, left: -24, bottom: 0 }}>
-                  <CartesianGrid stroke="#262b45" vertical={false} />
-                  <XAxis dataKey="name" stroke={GREY} tickLine={false} axisLine={false} interval={range === 'month' ? 2 : 0} fontSize={11} />
-                  <YAxis stroke={GREY} tickLine={false} axisLine={false} domain={[0, 100]} ticks={[0, 50, 100]} unit="%" fontSize={11} />
-                  <Tooltip cursor={{ fill: '#ffffff10' }} contentStyle={{ background: '#161a2e', border: '1px solid #2c3254', borderRadius: 10 }} formatter={(v: number | string, _n, item) => [`${v}% (${(item.payload as any).done}/${(item.payload as any).sched})`, 'Done']} labelFormatter={(_l, pl) => (pl && pl[0] ? shortDate((pl[0].payload as any).date) : '')} />
-                  <Bar dataKey="rate" radius={[4, 4, 0, 0]}>
-                    {bars.map((b, i) => <Cell key={i} fill={b.future ? '#2c3254' : (b.rate ?? 0) >= 100 ? GREEN : (b.rate ?? 0) >= 50 ? BLUE : RED} />)}
+                  <defs>
+                    {([['g', GREEN], ['b', BLUE], ['r', RED]] as const).map(([k, c]) => (
+                      <linearGradient key={k} id={'bar-' + k} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={c} /><stop offset="100%" stopColor={c} stopOpacity={0.35} />
+                      </linearGradient>
+                    ))}
+                  </defs>
+                  <CartesianGrid stroke="#ffffff0d" strokeDasharray="3 6" vertical={false} />
+                  <XAxis dataKey="name" {...axis} interval={range === 'month' ? 2 : 0} />
+                  <YAxis {...axis} domain={[0, 100]} ticks={[0, 50, 100]} unit="%" />
+                  <Tooltip cursor={{ fill: '#ffffff08', radius: 6 } as any} content={<ChartTip fmt={(_l: string, pl: any[]) => { const b = pl[0].payload; return `${shortDate(b.date)} · ${b.done}/${b.sched} done` }} />} />
+                  <Bar dataKey="rate" name="Done" unit="%" radius={[6, 6, 2, 2]} maxBarSize={28}>
+                    {bars.map((b, i) => <Cell key={i} fill={b.future ? C.future : (b.rate ?? 0) >= 100 ? 'url(#bar-g)' : (b.rate ?? 0) >= 50 ? 'url(#bar-b)' : 'url(#bar-r)'} />)}
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
@@ -144,20 +152,31 @@ export default function Stats({ data, scope, setScope }: { data: Data; scope: Sc
           </div>
 
           <div className="card">
+            <div className="card-title">Momentum</div>
+            <div className="small muted">Your 7-day average, smoothed. Dots are single days.</div>
+            <div className="chart"><MomentumCurve tasks={tasks} completions={data.completions} end={p.to < real ? p.to : real} days={range === 'year' ? 365 : range === 'month' ? 30 : 14} height={200} /></div>
+          </div>
+
+          <div className="card">
             <div className="card-title">Done vs possible, and where you're heading</div>
             <div className="chart">
               <ResponsiveContainer width="100%" height={230}>
-                <LineChart data={cum} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                  <CartesianGrid stroke="#262b45" vertical={false} />
-                  <XAxis dataKey="date" stroke={GREY} tickLine={false} axisLine={false} interval={tickEvery || 'preserveStartEnd'} tickFormatter={(d: string) => shortDate(d)} fontSize={11} />
-                  <YAxis stroke={GREY} tickLine={false} axisLine={false} fontSize={11} allowDecimals={false} />
-                  <Tooltip contentStyle={{ background: '#161a2e', border: '1px solid #2c3254', borderRadius: 10 }} labelFormatter={(d: string) => shortDate(d)} />
-                  {includesToday && <ReferenceLine x={real} stroke={GREY} strokeDasharray="3 3" />}
-                  <Line type="monotone" dataKey="possible" name="Everything scheduled" stroke={GREY} dot={false} strokeWidth={1.5} />
-                  <Line type="monotone" dataKey="actual" name="Done" stroke={GREEN} dot={false} strokeWidth={3} />
-                  <Line type="monotone" dataKey="ifDo" name="If you finish today, then all" stroke={GREEN} strokeDasharray="5 4" dot={false} strokeWidth={2} />
-                  <Line type="monotone" dataKey="ifMiss" name="If you miss today, then all" stroke={RED} strokeDasharray="5 4" dot={false} strokeWidth={2} />
-                </LineChart>
+                <ComposedChart data={cum} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="cum-fill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={GREEN} stopOpacity={0.35} /><stop offset="100%" stopColor={GREEN} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="#ffffff0d" strokeDasharray="3 6" vertical={false} />
+                  <XAxis dataKey="date" {...axis} interval={tickEvery || 'preserveStartEnd'} tickFormatter={(d: string) => shortDate(d)} />
+                  <YAxis {...axis} allowDecimals={false} />
+                  <Tooltip cursor={{ stroke: '#ffffff30' }} content={<ChartTip fmt={(d: string) => shortDate(d)} />} />
+                  {includesToday && <ReferenceLine x={real} stroke="#ffffff40" strokeDasharray="3 3" label={{ value: 'today', fill: GREY, fontSize: 10, position: 'insideTopRight' }} />}
+                  <Line type="monotone" dataKey="possible" name="Everything scheduled" stroke={GREY} dot={false} strokeWidth={1.5} strokeOpacity={0.7} />
+                  <Area type="monotone" dataKey="actual" name="Done" stroke={GREEN} fill="url(#cum-fill)" dot={false} strokeWidth={3} />
+                  <Line type="monotone" dataKey="ifDo" name="Finish today, then all" stroke={GREEN} strokeDasharray="5 4" dot={false} strokeWidth={2} />
+                  <Line type="monotone" dataKey="ifMiss" name="Miss today, then all" stroke={RED} strokeDasharray="5 4" dot={false} strokeWidth={2} />
+                </ComposedChart>
               </ResponsiveContainer>
             </div>
             <div className="legend"><i style={{ background: GREEN }} />done <i style={{ background: GREY }} />everything scheduled <i style={{ background: RED }} />miss-today path</div>

@@ -4,6 +4,7 @@ import type { Data, Goal, Task } from '../lib/types'
 import { shortDate, today as todayFn } from '../lib/dates'
 import { goalReport, pct, tasksOfGoal } from '../lib/stats'
 import { GoalForm, TaskForm } from './Forms'
+import { C, ChartTip, axis } from './Charts'
 
 interface Props {
   data: Data
@@ -46,16 +47,16 @@ function GoalCard({ goal, data, onEdit, onAddTask }: { goal: Goal; data: Data; o
           <div className="chart">
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={r.points} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-                <CartesianGrid stroke="#262b45" vertical={false} />
-                <XAxis dataKey="date" stroke="#5b6384" tickLine={false} axisLine={false} interval="preserveStartEnd" tickFormatter={(d: string) => shortDate(d)} fontSize={11} minTickGap={30} />
-                <YAxis stroke="#5b6384" tickLine={false} axisLine={false} fontSize={11} />
-                <Tooltip contentStyle={{ background: '#161a2e', border: '1px solid #2c3254', borderRadius: 10 }} labelFormatter={(d: string) => shortDate(d)} formatter={(v: number) => num(v)} />
-                <ReferenceLine x={real} stroke="#5b6384" strokeDasharray="3 3" />
-                <Line dataKey="ideal" name="Needed pace" stroke="#5b6384" dot={false} strokeWidth={1.5} />
-                <Line dataKey="actual" name="Actual" stroke={goal.color} dot={false} strokeWidth={3} />
-                <Line dataKey="projectedPace" name="At your pace" stroke="#6ea8ff" strokeDasharray="2 4" dot={false} strokeWidth={2} />
-                <Line dataKey="ifDoToday" name="Finish today, then all" stroke="#5eeaaa" strokeDasharray="5 4" dot={false} strokeWidth={2} />
-                <Line dataKey="ifMissToday" name="Miss today, then all" stroke="#ff7b9c" strokeDasharray="5 4" dot={false} strokeWidth={2} />
+                <CartesianGrid stroke="#ffffff0d" strokeDasharray="3 6" vertical={false} />
+                <XAxis dataKey="date" {...axis} interval="preserveStartEnd" tickFormatter={(d: string) => shortDate(d)} minTickGap={30} />
+                <YAxis {...axis} />
+                <Tooltip cursor={{ stroke: '#ffffff30' }} content={<ChartTip fmt={(d: string) => shortDate(d)} val={num} />} />
+                <ReferenceLine x={real} stroke="#ffffff40" strokeDasharray="3 3" />
+                <Line type="monotone" dataKey="ideal" name="Needed pace" stroke={C.axis} dot={false} strokeWidth={1.5} />
+                <Line type="monotone" dataKey="actual" name="Actual" stroke={goal.color} dot={false} strokeWidth={3} />
+                <Line dataKey="projectedPace" name="At your pace" stroke={C.sky} strokeDasharray="2 4" dot={false} strokeWidth={2} />
+                <Line dataKey="ifDoToday" name="Finish today, then all" stroke={C.mint} strokeDasharray="5 4" dot={false} strokeWidth={2} />
+                <Line dataKey="ifMissToday" name="Miss today, then all" stroke={C.rose} strokeDasharray="5 4" dot={false} strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
           </div>
